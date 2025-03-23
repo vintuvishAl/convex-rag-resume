@@ -1,9 +1,9 @@
 // convex/query.ts
 import { v } from "convex/values";
-import { action, mutation, query } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
+import { action, internalQuery, mutation, internalMutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
+import { sortChunksBySimilarity, ChunkWithEmbedding } from "./vectorUtils";
 
 // Function to handle user queries
 export const processQuery = action({
@@ -27,21 +27,23 @@ export const processQuery = action({
       const queryEmbedding = embeddingResponse.data[0].embedding;
       
       // Retrieve relevant chunks based on semantic similarity
-      let relevantChunks: { _id: Id<"resumeChunks">; text: string; _score: number }[] = [];
+      let relevantChunks: { text: string; _score: number }[] = [];
       
       if (args.resumeId) {
         // If a specific resume is chosen, search only within that resume
-        relevantChunks = await ctx.runQuery(internal.query.searchResumeChunks, {
+        const chunks = await ctx.runQuery(internal.query.internalSearchResumeChunks, {
           embedding: queryEmbedding,
           resumeId: args.resumeId,
           limit: 5,
         });
+        relevantChunks = chunks;
       } else {
         // Search across all resumes
-        relevantChunks = await ctx.runQuery(internal.query.searchAllResumeChunks, {
+        const chunks = await ctx.runQuery(internal.query.internalSearchAllResumeChunks, {
           embedding: queryEmbedding,
           limit: 5,
         });
+        relevantChunks = chunks;
       }
       
       // Prepare context from relevant chunks
@@ -69,7 +71,7 @@ export const processQuery = action({
       const response = completion.choices[0].message.content || "Sorry, I couldn't generate a response.";
       
       // Store the query and response
-      await ctx.runMutation(internal.query.saveQuery, {
+      await ctx.runMutation(internal.query.internalSaveQuery, {
         query: args.query,
         response,
         resumeId: args.resumeId,
@@ -86,63 +88,72 @@ export const processQuery = action({
   },
 });
 
-// Search resume chunks for a specific resume
-export const searchResumeChunks = query({
+// Search resume chunks for a specific resume with custom vector search
+export const internalSearchResumeChunks = internalQuery({
   args: {
     embedding: v.array(v.number()),
     resumeId: v.id("resumes"),
     limit: v.number(),
   },
   handler: async (ctx, args) => {
-    // Using vector search directly on the "resumeChunks" table
-    const vectorResults = await ctx.db.query("resumeChunks")
+    // Get all chunks for this resume
+    const allChunks = await ctx.db
+      .query("resumeChunks")
       .withIndex("byResumeId", (q) => q.eq("resumeId", args.resumeId))
       .collect();
-      
-    // For now, simulate vector search by getting all chunks
-    // In a real implementation, we'd use the embedding-based similarity
-    const results = vectorResults.slice(0, args.limit);
     
-    const chunks = await Promise.all(
-      results.map(async (chunk) => {
-        return {
-          _id: chunk._id,
-          text: chunk.text,
-          _score: 1.0, // Placeholder score since we're not doing real vector search yet
-        };
-      })
-    );
+    // Sort chunks by similarity to the query embedding
+    const sortedChunks = sortChunksBySimilarity(allChunks, args.embedding, args.limit);
     
-    return chunks;
+    // Extract and return just the text and score
+    return sortedChunks.map((chunk: ChunkWithEmbedding & { _score: number }) => ({
+      text: chunk.text,
+      _score: chunk._score
+    }));
   },
 });
 
-// Search all resume chunks
-export const searchAllResumeChunks = query({
+// Search all resume chunks with custom vector search
+export const internalSearchAllResumeChunks = internalQuery({
   args: {
     embedding: v.array(v.number()),
     limit: v.number(),
   },
   handler: async (ctx, args) => {
-    // Using regular query for now
-    const vectorResults = await ctx.db.query("resumeChunks")
-      .take(args.limit);
+    // Get all chunks
+    const allChunks = await ctx.db
+      .query("resumeChunks")
+      .collect();
     
-    const chunks = await Promise.all(
-      vectorResults.map(async (chunk) => {
-        return {
-          _id: chunk._id,
-          text: chunk.text,
-          _score: 1.0, // Placeholder score
-        };
-      })
-    );
+    // Sort chunks by similarity to the query embedding
+    const sortedChunks = sortChunksBySimilarity(allChunks, args.embedding, args.limit);
     
-    return chunks;
+    // Extract and return just the text and score
+    return sortedChunks.map((chunk: ChunkWithEmbedding & { _score: number }) => ({
+      text: chunk.text,
+      _score: chunk._score
+    }));
   },
 });
 
 // Save a query and its response
+export const internalSaveQuery = internalMutation({
+  args: {
+    query: v.string(),
+    response: v.string(),
+    resumeId: v.optional(v.id("resumes")),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("queries", {
+      query: args.query,
+      response: args.response,
+      resumeId: args.resumeId,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+// Public version of save query
 export const saveQuery = mutation({
   args: {
     query: v.string(),

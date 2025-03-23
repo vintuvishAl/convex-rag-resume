@@ -4,55 +4,40 @@ import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import { extractTextFromFile } from '../utils/fileExtraction';
 
 const ResumeUpload: React.FC = () => {
   const navigate = useNavigate();
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState<string>('');
   
   const uploadResume = useMutation(api.resume.uploadResume);
 
   const processFile = async (file: File) => {
     try {
       setUploadStatus('loading');
+      setProcessingStatus('Reading file...');
       
-      // Read the file content
-      const reader = new FileReader();
-      
-      const fileContent = await new Promise<string>((resolve, reject) => {
-        reader.onload = (e) => {
-          resolve(e.target?.result as string);
-        };
-        reader.onerror = () => {
-          reject(new Error('Failed to read file'));
-        };
-        
-        if (file.type === 'application/pdf' || 
-            file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          reader.readAsArrayBuffer(file);
-        } else {
-          reader.readAsText(file);
-        }
-      });
-      
-      // Extract text based on file type
+      // Extract text from the file using our utility
       let extractedText = '';
-      
-      if (file.type === 'application/pdf') {
-        // For PDF files, we would use a PDF parsing library
-        // In a real implementation, you'd use a proper PDF extraction library
-        // This is a placeholder - in production code, use pdf-parse or similar
-        extractedText = 'PDF text extraction placeholder';
-      } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        // For DOCX files
-        // In a real implementation, you'd use mammoth.js or similar
-        extractedText = 'DOCX text extraction placeholder';
-      } else if (file.type === 'text/plain') {
-        // For plain text files
-        extractedText = fileContent;
-      } else {
-        throw new Error('Unsupported file type');
+      try {
+        extractedText = await extractTextFromFile(file);
+      } catch (error) {
+        console.error('Error extracting text:', error);
+        throw new Error(
+          `Failed to extract text from ${file.name}. Please make sure it's a valid ${file.type} file.`
+        );
       }
+      
+      setProcessingStatus('Processing text...');
+      
+      // If we succeeded but got no text, show an error
+      if (!extractedText.trim()) {
+        throw new Error('No text could be extracted from the file. The file might be empty or contain only images.');
+      }
+      
+      setProcessingStatus('Uploading to database...');
       
       // Upload the resume to Convex
       const resumeId = await uploadResume({
@@ -61,6 +46,7 @@ const ResumeUpload: React.FC = () => {
         content: extractedText,
       });
       
+      setProcessingStatus('Generating embeddings...');
       setUploadStatus('success');
       
       // Navigate to the resume detail page
@@ -153,7 +139,10 @@ const ResumeUpload: React.FC = () => {
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 ></path>
               </svg>
-              <p className="mt-2 text-blue-600">Processing resume...</p>
+              <p className="mt-2 text-blue-600">{processingStatus}</p>
+              <p className="mt-1 text-sm text-blue-500">
+                This may take a moment depending on the file size...
+              </p>
             </div>
           )}
           
@@ -175,6 +164,9 @@ const ResumeUpload: React.FC = () => {
               </svg>
               <p className="mt-2 text-green-600">
                 Resume uploaded successfully! Redirecting...
+              </p>
+              <p className="mt-1 text-sm text-green-500">
+                Embedding generation will continue in the background.
               </p>
             </div>
           )}
@@ -218,6 +210,16 @@ const ResumeUpload: React.FC = () => {
             <li>Microsoft Word documents (.docx)</li>
             <li>Plain text files (.txt)</li>
           </ul>
+          
+          <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-100">
+            <h4 className="text-md font-medium text-blue-800 mb-2">Tips for Best Results</h4>
+            <ul className="list-disc pl-5 text-blue-700 space-y-1 text-sm">
+              <li>Use machine-readable PDFs (not scanned images)</li>
+              <li>Ensure the resume has clear headings and structure</li>
+              <li>If using a DOCX file, avoid complex formatting or tables</li>
+              <li>Larger files may take longer to process</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

@@ -16,6 +16,7 @@ import type {
 import type * as embedding from "../embedding.js";
 import type * as query from "../query.js";
 import type * as resume from "../resume.js";
+import type * as vectorUtils from "../vectorUtils.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -29,6 +30,7 @@ declare const fullApi: ApiFromModules<{
   embedding: typeof embedding;
   query: typeof query;
   resume: typeof resume;
+  vectorUtils: typeof vectorUtils;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,

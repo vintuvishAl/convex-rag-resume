@@ -36,4 +36,13 @@ export default defineSchema({
     resumeId: v.optional(v.id("resumes")),
     createdAt: v.number(), // Timestamp
   }).index("byTimestamp", ["createdAt"]),
+
+// Store chunking progress to track embedding generation
+chunkingProgress: defineTable({
+    resumeId: v.id("resumes"),
+    position: v.number(), // Current position in the text
+    chunkIndex: v.number(), // Next chunk index to process
+    isComplete: v.boolean(), // Whether chunking is complete
+  }).index("byResumeId", ["resumeId"]),
+
 });

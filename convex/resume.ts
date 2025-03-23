@@ -1,6 +1,6 @@
 // convex/resume.ts
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 // Function to handle resume upload
@@ -42,6 +42,18 @@ export const getResumes = query({
 
 // Query to get details of a specific resume
 export const getResumeById = query({
+  args: { id: v.id("resumes") },
+  handler: async (ctx, args) => {
+    const resume = await ctx.db.get(args.id);
+    if (!resume) {
+      throw new Error("Resume not found");
+    }
+    return resume;
+  },
+});
+
+// Make this function available internally to other Convex functions
+export const internalGetResumeById = internalQuery({
   args: { id: v.id("resumes") },
   handler: async (ctx, args) => {
     const resume = await ctx.db.get(args.id);
